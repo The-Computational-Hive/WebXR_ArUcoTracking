@@ -1,6 +1,8 @@
 export const CONFIG = {
   markerId: 3,
+  markerDictionaryName: 'ARUCO_MIP_36h12',
   markerSizeMeters: 0.1,
+  markerPoseBasis: 'camera-z-flip',
   detectionIntervalMs: 100,
   minStableSamples: 10,
   maxPositionDeltaMeters: 0.03,

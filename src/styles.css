@@ -76,6 +76,22 @@ canvas {
   opacity: 0.45;
 }
 
+.marker-overlay {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  width: min(280px, calc(100vw - 24px));
+  height: auto;
+  border: 1px solid rgba(79, 195, 247, 0.7);
+  border-radius: 8px;
+  background: rgba(10, 17, 28, 0.8);
+  z-index: 10;
+}
+
+.marker-overlay.is-hidden {
+  display: none;
+}
+
 @media (max-width: 700px) {
   .status-panel {
     min-width: unset;
@@ -93,5 +109,9 @@ canvas {
 
   .snap-controls button {
     flex: 1;
+  }
+
+  .marker-overlay {
+    width: 160px;
   }
 }
