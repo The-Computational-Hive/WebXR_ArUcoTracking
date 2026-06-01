@@ -15,6 +15,9 @@ export function createStatusPanel() {
   document.body.appendChild(panel);
 
   return {
+    getElement() {
+      return panel;
+    },
     setState(state) {
       panel.querySelector('#stateLine').textContent = `State: ${state}`;
     },

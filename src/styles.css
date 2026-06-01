@@ -39,7 +39,7 @@ canvas {
 
 .snap-controls {
   position: fixed;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  top: calc(16px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -49,6 +49,16 @@ canvas {
 
 .snap-controls.is-hidden {
   display: none;
+}
+
+.snap-controls.embedded {
+  position: static;
+  top: auto;
+  left: auto;
+  transform: none;
+  z-index: auto;
+  margin-top: 10px;
+  width: 100%;
 }
 
 .snap-controls button {
@@ -75,6 +85,10 @@ canvas {
 
   .snap-controls {
     width: calc(100% - 24px);
+  }
+
+  .snap-controls.embedded {
+    width: 100%;
   }
 
   .snap-controls button {

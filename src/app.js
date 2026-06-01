@@ -27,6 +27,8 @@ export function startApp() {
 
   const status = createStatusPanel();
   const controls = createSnapControls({
+    container: status.getElement(),
+    markerId: CONFIG.markerId,
     onSnap: () => {
       if (!stabilityFilter.isStable()) {
         return;
@@ -64,6 +66,7 @@ export function startApp() {
   status.setAnchorStatus('pending');
   controls.setVisible(false);
   controls.setSnapEnabled(false);
+  controls.setMarkerId(CONFIG.markerId);
 
   renderer.xr.addEventListener('sessionstart', () => {
     controls.setVisible(true);

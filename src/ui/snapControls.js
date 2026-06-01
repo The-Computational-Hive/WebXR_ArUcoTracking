@@ -1,11 +1,15 @@
-export function createSnapControls({ onSnap, onRealign }) {
+export function createSnapControls({ onSnap, onRealign, markerId, container }) {
   const controls = document.createElement('div');
   controls.className = 'snap-controls';
   controls.classList.add('is-hidden');
 
+  if (container) {
+    controls.classList.add('embedded');
+  }
+
   const snapButton = document.createElement('button');
   snapButton.id = 'snapButton';
-  snapButton.textContent = 'Snap to Marker';
+  snapButton.textContent = `Snap to Marker #${markerId}`;
   snapButton.disabled = true;
   snapButton.addEventListener('click', onSnap);
 
@@ -17,7 +21,7 @@ export function createSnapControls({ onSnap, onRealign }) {
 
   controls.appendChild(snapButton);
   controls.appendChild(realignButton);
-  document.body.appendChild(controls);
+  (container ?? document.body).appendChild(controls);
 
   return {
     setVisible(isVisible) {
@@ -25,6 +29,9 @@ export function createSnapControls({ onSnap, onRealign }) {
     },
     setSnapEnabled(isEnabled) {
       snapButton.disabled = !isEnabled;
+    },
+    setMarkerId(nextMarkerId) {
+      snapButton.textContent = `Snap to Marker #${nextMarkerId}`;
     },
     showRealign(show) {
       realignButton.hidden = !show;
