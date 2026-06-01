@@ -1,6 +1,4 @@
 export const CONFIG = {
-  markerId: 3,
-  markerDictionaryName: 'ARUCO_MIP_36h12',
   markerSizeMeters: 0.1,
   markerPoseBasis: 'camera-z-flip',
   trackedImageSourceUrl: '/assets/hivelens_v0_0.png',

@@ -1,10 +1,10 @@
-export function createTrackedImagePreview({ canvas, markerId, dictionaryName, sourceUrl }) {
+export function createTrackedImagePreview({ canvas, sourceUrl }) {
   const container = document.createElement('div');
   container.className = 'tracked-image-preview';
 
   const title = document.createElement('div');
   title.className = 'tracked-image-preview-title';
-  title.textContent = sourceUrl ? `Tracked image: ${sourceUrl}` : `Tracked image: ${dictionaryName} #${markerId}`;
+  title.textContent = `Tracked image: ${sourceUrl}`;
 
   const previewCanvas = document.createElement('canvas');
   previewCanvas.width = canvas.width;

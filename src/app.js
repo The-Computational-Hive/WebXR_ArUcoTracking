@@ -31,16 +31,12 @@ export async function startApp() {
     poseCorrection: CONFIG.trackedImagePoseCorrection,
   });
   const trackedMarkerTarget = await createTrackedMarkerTarget({
-    markerId: CONFIG.markerId,
-    dictionaryName: CONFIG.markerDictionaryName,
     sourceUrl: CONFIG.trackedImageSourceUrl,
     canvasSize: CONFIG.trackedImageCanvasSize,
     paddingRatio: CONFIG.trackedImagePaddingRatio,
   });
   const trackedImagePreview = createTrackedImagePreview({
     canvas: trackedMarkerTarget.canvas,
-    markerId: CONFIG.markerId,
-    dictionaryName: CONFIG.markerDictionaryName,
     sourceUrl: CONFIG.trackedImageSourceUrl,
   });
 
@@ -83,7 +79,7 @@ export async function startApp() {
   });
   const controls = createSnapControls({
     container: status.getElement(),
-    markerId: CONFIG.markerId,
+    markerId: 'image',
     onSnap: () => snapToStableImagePose(),
     onRealign: () => snapToStableImagePose(),
   });
