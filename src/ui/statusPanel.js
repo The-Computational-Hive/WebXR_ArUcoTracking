@@ -8,6 +8,8 @@ export function createStatusPanel() {
     <div id="markerLine">Marker ID: -</div>
     <div id="samplesLine">Samples: 0</div>
     <div id="detectionLine">Detection FPS: 0</div>
+    <div id="rawCameraLine">Raw camera: unknown</div>
+    <div id="imageTrackingLine">Image tracking: unknown</div>
     <div id="driftLine">Drift: -</div>
     <div id="anchorLine">Anchor: unknown</div>
   `;
@@ -29,6 +31,12 @@ export function createStatusPanel() {
     },
     setDetectionFps(fps) {
       panel.querySelector('#detectionLine').textContent = `Detection FPS: ${fps}`;
+    },
+    setRawCameraStatus(value) {
+      panel.querySelector('#rawCameraLine').textContent = `Raw camera: ${value}`;
+    },
+    setImageTrackingStatus(value) {
+      panel.querySelector('#imageTrackingLine').textContent = `Image tracking: ${value}`;
     },
     setDrift(translationMeters, rotationDeg) {
       if (translationMeters == null || rotationDeg == null) {

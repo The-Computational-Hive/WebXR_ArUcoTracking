@@ -1,31 +1,44 @@
+import * as THREE from 'three';
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
 import { AppState, CONFIG } from './config.js';
-import { ArucoDetector } from './marker/arucoDetector.js';
-import { CameraFrameSource } from './marker/cameraFrameSource.js';
 import { MarkerStabilityFilter } from './marker/markerStabilityFilter.js';
-import { MarkerPoseEstimator } from './marker/poseEstimator.js';
 import { createDebugMarker } from './scene/createDebugMarker.js';
 import { createScene } from './scene/createScene.js';
 import { createSceneRoot } from './scene/sceneRoot.js';
-import { createMarkerOverlay } from './ui/markerOverlay.js';
 import { createSnapControls } from './ui/snapControls.js';
 import { createStatusPanel } from './ui/statusPanel.js';
-import { markerCameraPoseToXRLocalPose } from './xr/markerToXRTransform.js';
+import { createTrackedImagePreview } from './ui/trackedImagePreview.js';
+import { AnchorManager } from './xr/anchorManager.js';
+import { ImageTrackingProbe } from './xr/imageTrackingProbe.js';
+import { RawCameraProbe } from './xr/rawCameraProbe.js';
+import { createTrackedMarkerTarget } from './xr/trackedMarkerImage.js';
 
-export function startApp() {
+export async function startApp() {
   const { scene, camera, renderer } = createScene();
   const { sceneRoot } = createSceneRoot();
   const debugMarker = createDebugMarker();
-  const arucoDetector = new ArucoDetector({
+  const anchorManager = new AnchorManager();
+  const rawCameraProbe = new RawCameraProbe({
+    requestTexture: CONFIG.rawCameraProbeTexture,
+    textureProbeIntervalMs: CONFIG.rawCameraTextureProbeIntervalMs,
+  });
+  const imageTrackingProbe = new ImageTrackingProbe({
+    targetIndex: 0,
+    poseCorrection: CONFIG.trackedImagePoseCorrection,
+  });
+  const trackedMarkerTarget = await createTrackedMarkerTarget({
     markerId: CONFIG.markerId,
     dictionaryName: CONFIG.markerDictionaryName,
+    sourceUrl: CONFIG.trackedImageSourceUrl,
+    canvasSize: CONFIG.trackedImageCanvasSize,
+    paddingRatio: CONFIG.trackedImagePaddingRatio,
   });
-  const poseEstimator = new MarkerPoseEstimator({
-    markerSizeMeters: CONFIG.markerSizeMeters,
-    basis: CONFIG.markerPoseBasis,
+  const trackedImagePreview = createTrackedImagePreview({
+    canvas: trackedMarkerTarget.canvas,
+    markerId: CONFIG.markerId,
+    dictionaryName: CONFIG.markerDictionaryName,
+    sourceUrl: CONFIG.trackedImageSourceUrl,
   });
-  const cameraFrameSource = new CameraFrameSource();
-  const markerOverlay = createMarkerOverlay();
 
   scene.add(sceneRoot);
   scene.add(debugMarker);
@@ -33,147 +46,188 @@ export function startApp() {
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(
     ARButton.createButton(renderer, {
-      requiredFeatures: [],
-      optionalFeatures: ['anchors', 'dom-overlay'],
+      requiredFeatures: CONFIG.requireImageTracking ? ['image-tracking'] : [],
+      optionalFeatures: [
+        'anchors',
+        'camera-access',
+        'dom-overlay',
+        ...(CONFIG.requireImageTracking ? [] : ['image-tracking']),
+      ],
       domOverlay: { root: document.body },
+      trackedImages: [
+        {
+          image: trackedMarkerTarget.imageBitmap,
+          widthInMeters: CONFIG.trackedImageWidthMeters,
+        },
+      ],
     })
   );
 
   const status = createStatusPanel();
-  let appState = AppState.SEARCHING_MARKER;
-  let latestStableMarkerPoseCameraSpace = null;
-  let latestStableMarkerPoseXRLocal = null;
-
-  const controls = createSnapControls({
-    container: status.getElement(),
-    markerId: CONFIG.markerId,
-    onSnap: () => {
-      if (!latestStableMarkerPoseXRLocal) {
-        return;
-      }
-
-      sceneRoot.matrixAutoUpdate = false;
-      sceneRoot.matrix.copy(latestStableMarkerPoseXRLocal.matrix);
-      sceneRoot.matrix.decompose(sceneRoot.position, sceneRoot.quaternion, sceneRoot.scale);
-
-      appState = AppState.TRACKING_WITH_WEBXR;
-      status.setState(appState);
-      controls.setSnapEnabled(false);
-    },
-    onRealign: () => {
-      controls.showRealign(false);
-      appState = AppState.TRACKING_WITH_WEBXR;
-      status.setState(appState);
-    },
-  });
-
-  const stabilityFilter = new MarkerStabilityFilter({
+  let latestTrackedImageMatrix = null;
+  let latestStableTrackedImageMatrix = null;
+  let pendingAnchorMatrix = null;
+  const imageTrackingStabilityFilter = new MarkerStabilityFilter({
     minStableSamples: CONFIG.minStableSamples,
     maxPositionDeltaMeters: CONFIG.maxPositionDeltaMeters,
     maxRotationDeltaDeg: CONFIG.maxRotationDeltaDeg,
     maxSampleAgeMs: CONFIG.maxSampleAgeMs,
   });
+  const controls = createSnapControls({
+    container: status.getElement(),
+    markerId: CONFIG.markerId,
+    onSnap: () => {
+      if (!latestStableTrackedImageMatrix) {
+        return;
+      }
 
+      sceneRoot.matrixAutoUpdate = false;
+      sceneRoot.matrix.copy(latestStableTrackedImageMatrix);
+      sceneRoot.matrix.decompose(sceneRoot.position, sceneRoot.quaternion, sceneRoot.scale);
+      pendingAnchorMatrix = latestStableTrackedImageMatrix.clone();
+
+      appState = AppState.TRACKING_WITH_WEBXR;
+      status.setState(appState);
+      status.setAnchorStatus('creating...');
+      controls.setSnapEnabled(false);
+    },
+    onRealign: () => {},
+  });
+
+  let appState = AppState.SEARCHING_MARKER;
   status.setState(appState);
+  status.setMarkerId('-');
+  status.setSamples(0);
+  status.setDetectionFps(0);
+  status.setRawCameraStatus('enter AR to probe');
+  status.setImageTrackingStatus('enter AR to probe');
   status.setAnchorStatus('pending');
   controls.setVisible(true);
   controls.setSnapEnabled(false);
-  controls.setMarkerId(CONFIG.markerId);
-  markerOverlay.setVisible(true);
-
-  cameraFrameSource.start().catch((error) => {
-    console.error(error);
-    status.setMarkerId('camera unavailable');
-  });
+  controls.showRealign(false);
 
   renderer.xr.addEventListener('sessionstart', () => {
-    controls.setVisible(true);
-    cameraFrameSource.stop();
-    markerOverlay.setVisible(false);
+    appState = AppState.SEARCHING_MARKER;
+    status.setState(appState);
+    status.setRawCameraStatus('probing...');
+    status.setImageTrackingStatus('probing...');
+    rawCameraProbe.reset();
+    imageTrackingProbe.reset();
+    anchorManager.reset();
+    latestTrackedImageMatrix = null;
+    latestStableTrackedImageMatrix = null;
+    pendingAnchorMatrix = null;
+    imageTrackingStabilityFilter.reset();
+    controls.setSnapEnabled(false);
+    status.setSamples(0);
+    trackedImagePreview.setVisible(false);
   });
 
   renderer.xr.addEventListener('sessionend', () => {
-    latestStableMarkerPoseXRLocal = null;
-    cameraFrameSource.start().catch((error) => {
-      console.error(error);
-      status.setMarkerId('camera unavailable');
-    });
-    markerOverlay.setVisible(true);
-    controls.setVisible(true);
-    controls.showRealign(false);
-    controls.setSnapEnabled(false);
-    stabilityFilter.reset();
-    debugMarker.visible = false;
-    latestStableMarkerPoseCameraSpace = null;
     appState = AppState.SEARCHING_MARKER;
     status.setState(appState);
-    status.setMarkerId('-');
+    status.setRawCameraStatus('enter AR to probe');
+    status.setImageTrackingStatus('enter AR to probe');
+    rawCameraProbe.reset();
+    imageTrackingProbe.reset();
+    anchorManager.reset();
+    latestTrackedImageMatrix = null;
+    latestStableTrackedImageMatrix = null;
+    pendingAnchorMatrix = null;
+    imageTrackingStabilityFilter.reset();
+    controls.setSnapEnabled(false);
     status.setSamples(0);
+    trackedImagePreview.setVisible(true);
+    debugMarker.visible = false;
   });
 
-  let lastDetectionTs = 0;
-  renderer.setAnimationLoop((ts) => {
-    if (!renderer.xr.isPresenting && ts - lastDetectionTs >= CONFIG.detectionIntervalMs) {
-      lastDetectionTs = ts;
+  let lastStatus = '';
+  let lastImageTrackingStatus = '';
+  renderer.setAnimationLoop((timestamp, frame) => {
+    if (renderer.xr.isPresenting) {
+      anchorManager.initialize(frame);
 
-      status.setDetectionFps(Math.round(1000 / CONFIG.detectionIntervalMs));
-      status.setSamples(stabilityFilter.getSampleCount());
+      const rawCameraStatus = rawCameraProbe.update({
+        frame,
+        renderer,
+        timestamp,
+      });
 
-      const frame = cameraFrameSource.getFrame(ts);
-      const imageData = frame?.imageData ?? null;
-      const marker = imageData ? arucoDetector.detect(imageData) : null;
-      markerOverlay.draw(imageData, marker, frame?.stats);
+      if (rawCameraStatus !== lastStatus) {
+        lastStatus = rawCameraStatus;
+        status.setRawCameraStatus(rawCameraStatus);
+      }
 
-      if (marker) {
-        status.setMarkerId(marker.id);
+      const imageTrackingState = imageTrackingProbe.update({
+        frame,
+        renderer,
+        targetObject: debugMarker,
+      });
+      const imageTrackingStatus = imageTrackingState.status;
+      latestTrackedImageMatrix = imageTrackingState.matrix;
 
-        const markerPoseCameraSpace = poseEstimator.estimatePose(marker.corners, {
-          width: imageData.width,
-          height: imageData.height,
-        });
+      if (latestTrackedImageMatrix) {
+        imageTrackingStabilityFilter.addSample(matrixToPose(latestTrackedImageMatrix), timestamp);
+        status.setSamples(imageTrackingStabilityFilter.getSampleCount());
 
-        if (markerPoseCameraSpace) {
-          stabilityFilter.addSample(markerPoseCameraSpace, ts);
-          status.setSamples(stabilityFilter.getSampleCount());
+        const stablePose = imageTrackingStabilityFilter.getStablePose();
+        latestStableTrackedImageMatrix = stablePose?.matrix ?? null;
+        controls.setSnapEnabled(Boolean(latestStableTrackedImageMatrix) && appState !== AppState.TRACKING_WITH_WEBXR);
 
-          if (stabilityFilter.isStable()) {
-            latestStableMarkerPoseCameraSpace = stabilityFilter.getStablePose();
-            appState = AppState.MARKER_STABLE;
-            status.setState(appState);
-          }
-        }
-
-        if (appState === AppState.SEARCHING_MARKER && !stabilityFilter.isStable()) {
+        if (stablePose && appState !== AppState.TRACKING_WITH_WEBXR) {
+          appState = AppState.MARKER_STABLE;
+          status.setState(appState);
+        } else if (appState === AppState.SEARCHING_MARKER) {
           appState = AppState.MARKER_DETECTED;
           status.setState(appState);
         }
       } else {
-        if (appState === AppState.MARKER_DETECTED || appState === AppState.MARKER_STABLE) {
-          stabilityFilter.reset();
-          latestStableMarkerPoseCameraSpace = null;
-          controls.setSnapEnabled(false);
-          debugMarker.visible = false;
+        imageTrackingStabilityFilter.reset();
+        latestStableTrackedImageMatrix = null;
+        controls.setSnapEnabled(false);
+        status.setSamples(0);
+
+        if (appState === AppState.MARKER_STABLE || appState === AppState.MARKER_DETECTED) {
           appState = AppState.SEARCHING_MARKER;
           status.setState(appState);
         }
-
-        if (appState === AppState.SEARCHING_MARKER) {
-          status.setMarkerId('-');
-        }
       }
-    }
 
-    if (renderer.xr.isPresenting && latestStableMarkerPoseCameraSpace && !latestStableMarkerPoseXRLocal) {
-      latestStableMarkerPoseXRLocal = markerCameraPoseToXRLocalPose({
-        markerPoseCameraSpace: latestStableMarkerPoseCameraSpace,
-        xrCamera: camera,
+      if (imageTrackingStatus !== lastImageTrackingStatus) {
+        lastImageTrackingStatus = imageTrackingStatus;
+        status.setImageTrackingStatus(imageTrackingStatus);
+      }
+
+      const referenceSpace = renderer.xr.getReferenceSpace();
+
+      if (pendingAnchorMatrix && !anchorManager.isCreating && frame?.createAnchor && referenceSpace) {
+        const anchorMatrix = pendingAnchorMatrix.clone();
+        pendingAnchorMatrix = null;
+
+        anchorManager
+          .createAnchorAtMatrix({
+            frame,
+            referenceSpace,
+            matrix: anchorMatrix,
+          })
+          .then((anchor) => {
+            status.setAnchorStatus(anchor ? 'created' : 'unavailable');
+          })
+          .catch((error) => {
+            console.error(error);
+            status.setAnchorStatus(`error: ${error.name ?? 'unknown'}`);
+          });
+      }
+
+      const anchorStatus = anchorManager.updateSceneRootFromAnchor({
+        frame,
+        referenceSpace,
+        sceneRoot,
       });
 
-      debugMarker.matrixAutoUpdate = false;
-      debugMarker.matrix.copy(latestStableMarkerPoseXRLocal.matrix);
-      debugMarker.matrix.decompose(debugMarker.position, debugMarker.quaternion, debugMarker.scale);
-      debugMarker.visible = true;
-      controls.setSnapEnabled(true);
+      if (anchorStatus !== 'none') {
+        status.setAnchorStatus(anchorStatus);
+      }
     }
 
     renderer.render(scene, camera);
@@ -184,4 +238,17 @@ export function startApp() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+}
+
+function matrixToPose(matrix) {
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  matrix.decompose(position, quaternion, scale);
+
+  return {
+    position,
+    quaternion,
+    matrix,
+  };
 }

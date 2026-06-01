@@ -92,6 +92,35 @@ canvas {
   display: none;
 }
 
+.tracked-image-preview {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  width: 180px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(10, 17, 28, 0.86);
+  color: #e0e7ff;
+  border: 1px solid rgba(124, 156, 255, 0.3);
+  font-size: 12px;
+  z-index: 10;
+}
+
+.tracked-image-preview.is-hidden {
+  display: none;
+}
+
+.tracked-image-preview-title {
+  margin-bottom: 8px;
+}
+
+.tracked-image-preview canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #ffffff;
+}
+
 @media (max-width: 700px) {
   .status-panel {
     min-width: unset;
@@ -113,5 +142,9 @@ canvas {
 
   .marker-overlay {
     width: 160px;
+  }
+
+  .tracked-image-preview {
+    width: 128px;
   }
 }
