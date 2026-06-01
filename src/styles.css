@@ -1,0 +1,83 @@
+:root {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(160deg, #0d1b2a 0%, #1b263b 60%, #22374f 100%);
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+}
+
+.status-panel {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  min-width: 240px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(10, 17, 28, 0.8);
+  color: #e0e7ff;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(124, 156, 255, 0.3);
+  font-size: 13px;
+  line-height: 1.4;
+  z-index: 10;
+}
+
+.status-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.snap-controls {
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 11;
+}
+
+.snap-controls.is-hidden {
+  display: none;
+}
+
+.snap-controls button {
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #4fc3f7;
+  color: #0b1f2d;
+}
+
+.snap-controls button:disabled {
+  opacity: 0.45;
+}
+
+@media (max-width: 700px) {
+  .status-panel {
+    min-width: unset;
+    width: calc(100% - 24px);
+    box-sizing: border-box;
+  }
+
+  .snap-controls {
+    width: calc(100% - 24px);
+  }
+
+  .snap-controls button {
+    flex: 1;
+  }
+}
