@@ -10,6 +10,7 @@ export function createStatusPanel() {
     <div id="detectionLine">Detection FPS: 0</div>
     <div id="rawCameraLine">Raw camera: unknown</div>
     <div id="imageTrackingLine">Image tracking: unknown</div>
+    <div id="surfaceLine">Surface: unknown</div>
     <div id="driftLine">Drift: -</div>
     <div id="anchorLine">Anchor: unknown</div>
   `;
@@ -37,6 +38,9 @@ export function createStatusPanel() {
     },
     setImageTrackingStatus(value) {
       panel.querySelector('#imageTrackingLine').textContent = `Image tracking: ${value}`;
+    },
+    setSurfaceStatus(value) {
+      panel.querySelector('#surfaceLine').textContent = `Surface: ${value}`;
     },
     setDrift(translationMeters, rotationDeg) {
       if (translationMeters == null || rotationDeg == null) {

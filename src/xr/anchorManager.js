@@ -5,6 +5,9 @@ export class AnchorManager {
     this.isSupported = false;
     this.anchor = null;
     this.isCreating = false;
+    this.anchorToSceneRoot = new THREE.Matrix4().identity();
+    this.fallbackMatrix = null;
+    this.usesFallback = false;
   }
 
   initialize(frame) {
@@ -12,7 +15,7 @@ export class AnchorManager {
     return this.isSupported;
   }
 
-  async createAnchorAtMatrix({ frame, referenceSpace, matrix }) {
+  async createAnchorAtMatrix({ frame, referenceSpace, matrix, anchorToSceneRoot }) {
     if (!frame?.createAnchor || !referenceSpace || !matrix || this.isCreating) {
       return null;
     }
@@ -31,6 +34,24 @@ export class AnchorManager {
       );
 
       this.anchor = await frame.createAnchor(transform, referenceSpace);
+      this.anchorToSceneRoot.copy(anchorToSceneRoot ?? new THREE.Matrix4());
+      this.isSupported = true;
+      return this.anchor;
+    } finally {
+      this.isCreating = false;
+    }
+  }
+
+  async createAnchorFromHitTest({ hitResult, anchorToSceneRoot }) {
+    if (!hitResult?.createAnchor || this.isCreating) {
+      return null;
+    }
+
+    this.isCreating = true;
+
+    try {
+      this.anchor = await hitResult.createAnchor();
+      this.anchorToSceneRoot.copy(anchorToSceneRoot ?? new THREE.Matrix4());
       this.isSupported = true;
       return this.anchor;
     } finally {
@@ -39,6 +60,16 @@ export class AnchorManager {
   }
 
   updateSceneRootFromAnchor({ frame, referenceSpace, sceneRoot }) {
+    if (this.usesFallback) {
+      if (this.fallbackMatrix && sceneRoot) {
+        sceneRoot.matrixAutoUpdate = false;
+        sceneRoot.matrix.copy(this.fallbackMatrix);
+        sceneRoot.matrix.decompose(sceneRoot.position, sceneRoot.quaternion, sceneRoot.scale);
+      }
+
+      return 'fallback: XR local';
+    }
+
     if (!this.anchor || !frame || !referenceSpace || !sceneRoot) {
       return 'none';
     }
@@ -54,6 +85,7 @@ export class AnchorManager {
 
     sceneRoot.matrixAutoUpdate = false;
     sceneRoot.matrix.fromArray(pose.transform.matrix);
+    sceneRoot.matrix.multiply(this.anchorToSceneRoot);
     sceneRoot.matrix.decompose(sceneRoot.position, sceneRoot.quaternion, sceneRoot.scale);
     return 'tracking';
   }
@@ -65,5 +97,14 @@ export class AnchorManager {
 
     this.anchor = null;
     this.isCreating = false;
+    this.anchorToSceneRoot.identity();
+    this.fallbackMatrix = null;
+    this.usesFallback = false;
+  }
+
+  useFallbackMatrix(matrix) {
+    this.reset();
+    this.fallbackMatrix = matrix?.clone() ?? null;
+    this.usesFallback = Boolean(this.fallbackMatrix);
   }
 }

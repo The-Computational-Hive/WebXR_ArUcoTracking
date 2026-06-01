@@ -5,10 +5,12 @@ import { MarkerStabilityFilter } from './marker/markerStabilityFilter.js';
 import { createDebugMarker } from './scene/createDebugMarker.js';
 import { createScene } from './scene/createScene.js';
 import { createSceneRoot } from './scene/sceneRoot.js';
+import { createSurfaceGrid } from './scene/createSurfaceGrid.js';
 import { createSnapControls } from './ui/snapControls.js';
 import { createStatusPanel } from './ui/statusPanel.js';
 import { createTrackedImagePreview } from './ui/trackedImagePreview.js';
 import { AnchorManager } from './xr/anchorManager.js';
+import { HitTestManager } from './xr/hitTestManager.js';
 import { ImageTrackingProbe } from './xr/imageTrackingProbe.js';
 import { RawCameraProbe } from './xr/rawCameraProbe.js';
 import { createTrackedMarkerTarget } from './xr/trackedMarkerImage.js';
@@ -17,7 +19,9 @@ export async function startApp() {
   const { scene, camera, renderer } = createScene();
   const { sceneRoot } = createSceneRoot();
   const debugMarker = createDebugMarker();
+  const surfaceGrid = createSurfaceGrid();
   const anchorManager = new AnchorManager();
+  const hitTestManager = new HitTestManager();
   const rawCameraProbe = new RawCameraProbe({
     requestTexture: CONFIG.rawCameraProbeTexture,
     textureProbeIntervalMs: CONFIG.rawCameraTextureProbeIntervalMs,
@@ -42,6 +46,7 @@ export async function startApp() {
 
   scene.add(sceneRoot);
   scene.add(debugMarker);
+  scene.add(surfaceGrid);
 
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(
@@ -51,6 +56,7 @@ export async function startApp() {
         'anchors',
         'camera-access',
         'dom-overlay',
+        'hit-test',
         ...(CONFIG.requireImageTracking ? [] : ['image-tracking']),
       ],
       domOverlay: { root: document.body },
@@ -66,7 +72,9 @@ export async function startApp() {
   const status = createStatusPanel();
   let latestTrackedImageMatrix = null;
   let latestStableTrackedImageMatrix = null;
-  let pendingAnchorMatrix = null;
+  let latestSurfaceHit = null;
+  let pendingSurfaceAnchor = false;
+  let hasSnapped = false;
   const imageTrackingStabilityFilter = new MarkerStabilityFilter({
     minStableSamples: CONFIG.minStableSamples,
     maxPositionDeltaMeters: CONFIG.maxPositionDeltaMeters,
@@ -76,23 +84,34 @@ export async function startApp() {
   const controls = createSnapControls({
     container: status.getElement(),
     markerId: CONFIG.markerId,
-    onSnap: () => {
-      if (!latestStableTrackedImageMatrix) {
-        return;
-      }
-
-      sceneRoot.matrixAutoUpdate = false;
-      sceneRoot.matrix.copy(latestStableTrackedImageMatrix);
-      sceneRoot.matrix.decompose(sceneRoot.position, sceneRoot.quaternion, sceneRoot.scale);
-      pendingAnchorMatrix = latestStableTrackedImageMatrix.clone();
-
-      appState = AppState.TRACKING_WITH_WEBXR;
-      status.setState(appState);
-      status.setAnchorStatus('creating...');
-      controls.setSnapEnabled(false);
-    },
-    onRealign: () => {},
+    onSnap: () => snapToStableImagePose(),
+    onRealign: () => snapToStableImagePose(),
   });
+
+  function snapToStableImagePose() {
+    if (!latestStableTrackedImageMatrix) {
+      return;
+    }
+
+    sceneRoot.matrixAutoUpdate = false;
+    sceneRoot.matrix.copy(latestStableTrackedImageMatrix);
+    sceneRoot.matrix.decompose(sceneRoot.position, sceneRoot.quaternion, sceneRoot.scale);
+    pendingSurfaceAnchor = Boolean(latestSurfaceHit);
+    hasSnapped = true;
+
+    appState = AppState.TRACKING_WITH_WEBXR;
+    status.setState(appState);
+    controls.showRealign(false);
+
+    if (pendingSurfaceAnchor) {
+      status.setAnchorStatus('creating...');
+    } else {
+      anchorManager.useFallbackMatrix(latestStableTrackedImageMatrix);
+      status.setAnchorStatus('fallback: XR local');
+    }
+
+    controls.setSnapEnabled(false);
+  }
 
   let appState = AppState.SEARCHING_MARKER;
   status.setState(appState);
@@ -101,6 +120,7 @@ export async function startApp() {
   status.setDetectionFps(0);
   status.setRawCameraStatus('enter AR to probe');
   status.setImageTrackingStatus('enter AR to probe');
+  status.setSurfaceStatus('enter AR to scan');
   status.setAnchorStatus('pending');
   controls.setVisible(true);
   controls.setSnapEnabled(false);
@@ -111,12 +131,23 @@ export async function startApp() {
     status.setState(appState);
     status.setRawCameraStatus('probing...');
     status.setImageTrackingStatus('probing...');
+    status.setSurfaceStatus('requesting...');
     rawCameraProbe.reset();
     imageTrackingProbe.reset();
     anchorManager.reset();
+    hitTestManager.reset();
+    hitTestManager
+      .initialize(renderer.xr.getSession())
+      .then(() => status.setSurfaceStatus('scanning...'))
+      .catch((error) => {
+        console.error(error);
+        status.setSurfaceStatus(`error: ${error.name ?? 'unknown'}`);
+      });
     latestTrackedImageMatrix = null;
     latestStableTrackedImageMatrix = null;
-    pendingAnchorMatrix = null;
+    latestSurfaceHit = null;
+    pendingSurfaceAnchor = false;
+    hasSnapped = false;
     imageTrackingStabilityFilter.reset();
     controls.setSnapEnabled(false);
     status.setSamples(0);
@@ -128,21 +159,27 @@ export async function startApp() {
     status.setState(appState);
     status.setRawCameraStatus('enter AR to probe');
     status.setImageTrackingStatus('enter AR to probe');
+    status.setSurfaceStatus('enter AR to scan');
     rawCameraProbe.reset();
     imageTrackingProbe.reset();
     anchorManager.reset();
+    hitTestManager.reset();
     latestTrackedImageMatrix = null;
     latestStableTrackedImageMatrix = null;
-    pendingAnchorMatrix = null;
+    latestSurfaceHit = null;
+    pendingSurfaceAnchor = false;
+    hasSnapped = false;
     imageTrackingStabilityFilter.reset();
     controls.setSnapEnabled(false);
     status.setSamples(0);
     trackedImagePreview.setVisible(true);
     debugMarker.visible = false;
+    surfaceGrid.visible = false;
   });
 
   let lastStatus = '';
   let lastImageTrackingStatus = '';
+  let lastSurfaceStatus = '';
   renderer.setAnimationLoop((timestamp, frame) => {
     if (renderer.xr.isPresenting) {
       anchorManager.initialize(frame);
@@ -166,13 +203,27 @@ export async function startApp() {
       const imageTrackingStatus = imageTrackingState.status;
       latestTrackedImageMatrix = imageTrackingState.matrix;
 
-      if (latestTrackedImageMatrix) {
+      const surfaceState = hitTestManager.update({
+        frame,
+        renderer,
+        targetObject: surfaceGrid,
+      });
+      latestSurfaceHit = surfaceState.hit;
+
+      if (surfaceState.status !== lastSurfaceStatus) {
+        lastSurfaceStatus = surfaceState.status;
+        status.setSurfaceStatus(surfaceState.status);
+      }
+
+      if (imageTrackingState.isLive && latestTrackedImageMatrix) {
         imageTrackingStabilityFilter.addSample(matrixToPose(latestTrackedImageMatrix), timestamp);
         status.setSamples(imageTrackingStabilityFilter.getSampleCount());
 
         const stablePose = imageTrackingStabilityFilter.getStablePose();
         latestStableTrackedImageMatrix = stablePose?.matrix ?? null;
-        controls.setSnapEnabled(Boolean(latestStableTrackedImageMatrix) && appState !== AppState.TRACKING_WITH_WEBXR);
+        controls.setSnapEnabled(
+          Boolean(latestStableTrackedImageMatrix && latestSurfaceHit) && appState !== AppState.TRACKING_WITH_WEBXR
+        );
 
         if (stablePose && appState !== AppState.TRACKING_WITH_WEBXR) {
           appState = AppState.MARKER_STABLE;
@@ -187,10 +238,22 @@ export async function startApp() {
         controls.setSnapEnabled(false);
         status.setSamples(0);
 
-        if (appState === AppState.MARKER_STABLE || appState === AppState.MARKER_DETECTED) {
+        if (!hasSnapped && (appState === AppState.MARKER_STABLE || appState === AppState.MARKER_DETECTED)) {
           appState = AppState.SEARCHING_MARKER;
           status.setState(appState);
         }
+      }
+
+      if (hasSnapped && latestStableTrackedImageMatrix) {
+        const drift = measureMatrixDrift(sceneRoot.matrix, latestStableTrackedImageMatrix);
+        status.setDrift(drift.translationMeters, drift.rotationDeg);
+        controls.showRealign(
+          drift.translationMeters >= CONFIG.largeDriftTranslationMeters ||
+            drift.rotationDeg >= CONFIG.largeDriftRotationDeg
+        );
+      } else if (hasSnapped && !latestTrackedImageMatrix) {
+        status.setDrift(null, null);
+        controls.showRealign(false);
       }
 
       if (imageTrackingStatus !== lastImageTrackingStatus) {
@@ -200,23 +263,52 @@ export async function startApp() {
 
       const referenceSpace = renderer.xr.getReferenceSpace();
 
-      if (pendingAnchorMatrix && !anchorManager.isCreating && frame?.createAnchor && referenceSpace) {
-        const anchorMatrix = pendingAnchorMatrix.clone();
-        pendingAnchorMatrix = null;
+      if (
+        pendingSurfaceAnchor &&
+        latestStableTrackedImageMatrix &&
+        latestSurfaceHit &&
+        !anchorManager.isCreating &&
+        referenceSpace
+      ) {
+        const anchorToSceneRoot = new THREE.Matrix4()
+          .copy(latestSurfaceHit.matrix)
+          .invert()
+          .multiply(latestStableTrackedImageMatrix);
+        const hitResult = latestSurfaceHit.result;
+        pendingSurfaceAnchor = false;
+        const canCreateAnchor = Boolean(hitResult.createAnchor || frame?.createAnchor);
 
-        anchorManager
-          .createAnchorAtMatrix({
-            frame,
-            referenceSpace,
-            matrix: anchorMatrix,
-          })
-          .then((anchor) => {
-            status.setAnchorStatus(anchor ? 'created' : 'unavailable');
-          })
-          .catch((error) => {
-            console.error(error);
-            status.setAnchorStatus(`error: ${error.name ?? 'unknown'}`);
-          });
+        if (!canCreateAnchor) {
+          anchorManager.useFallbackMatrix(latestStableTrackedImageMatrix);
+          status.setAnchorStatus('fallback: anchors unavailable');
+        } else {
+          const createAnchorPromise = hitResult.createAnchor
+            ? anchorManager.createAnchorFromHitTest({
+                hitResult,
+                anchorToSceneRoot,
+              })
+            : anchorManager.createAnchorAtMatrix({
+                frame,
+                referenceSpace,
+                matrix: latestSurfaceHit.matrix,
+                anchorToSceneRoot,
+              });
+
+          createAnchorPromise
+            .then((anchor) => {
+              if (anchor) {
+                status.setAnchorStatus('created');
+              } else {
+                anchorManager.useFallbackMatrix(latestStableTrackedImageMatrix);
+                status.setAnchorStatus('fallback: XR local');
+              }
+            })
+            .catch((error) => {
+              console.error(error);
+              anchorManager.useFallbackMatrix(latestStableTrackedImageMatrix);
+              status.setAnchorStatus(`fallback: ${error.name ?? 'anchor error'}`);
+            });
+        }
       }
 
       const anchorStatus = anchorManager.updateSceneRootFromAnchor({
@@ -250,5 +342,18 @@ function matrixToPose(matrix) {
     position,
     quaternion,
     matrix,
+  };
+}
+
+function measureMatrixDrift(referenceMatrix, measuredMatrix) {
+  const referencePose = matrixToPose(referenceMatrix);
+  const measuredPose = matrixToPose(measuredMatrix);
+  const translationMeters = referencePose.position.distanceTo(measuredPose.position);
+  const dot = Math.min(1, Math.max(-1, Math.abs(referencePose.quaternion.dot(measuredPose.quaternion))));
+  const rotationDeg = (2 * Math.acos(dot) * 180) / Math.PI;
+
+  return {
+    translationMeters,
+    rotationDeg,
   };
 }

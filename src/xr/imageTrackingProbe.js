@@ -29,10 +29,12 @@ export class ImageTrackingProbe {
     this.targetIndex = targetIndex;
     this.poseCorrection = POSE_CORRECTIONS[poseCorrection] ?? POSE_CORRECTIONS.none;
     this.status = 'waiting for XR frame';
+    this.lastMatrix = null;
   }
 
   reset() {
     this.status = 'waiting for XR frame';
+    this.lastMatrix = null;
   }
 
   update({ frame, renderer, targetObject }) {
@@ -51,19 +53,22 @@ export class ImageTrackingProbe {
     const result = results.find((candidate) => candidate.index === this.targetIndex);
 
     if (!result) {
-      this.status = `no tracked image (${results.length} results)`;
-      return { status: this.status, result: null, matrix: null };
+      this.status = this.lastMatrix ? `image lost, frozen (${results.length} results)` : `no tracked image (${results.length} results)`;
+      return { status: this.status, result: null, matrix: null, isLive: false, frozenMatrix: this.lastMatrix };
     }
 
     const pose = frame.getPose(result.imageSpace, referenceSpace);
     if (!pose) {
-      this.status = `image ${result.index}: no pose`;
-      return { status: this.status, result, matrix: null };
+      this.status = this.lastMatrix ? `image ${result.index}: no pose, frozen` : `image ${result.index}: no pose`;
+      return { status: this.status, result, matrix: null, isLive: false, frozenMatrix: this.lastMatrix };
     }
+
+    const matrix = this.getCorrectedPoseMatrix(pose);
+    this.lastMatrix = matrix.clone();
 
     if (targetObject) {
       targetObject.matrixAutoUpdate = false;
-      targetObject.matrix.copy(this.getCorrectedPoseMatrix(pose));
+      targetObject.matrix.copy(matrix);
       targetObject.matrix.decompose(targetObject.position, targetObject.quaternion, targetObject.scale);
       targetObject.visible = true;
     }
@@ -72,7 +77,9 @@ export class ImageTrackingProbe {
     return {
       status: this.status,
       result,
-      matrix: this.getCorrectedPoseMatrix(pose),
+      matrix,
+      isLive: true,
+      frozenMatrix: null,
     };
   }
 
